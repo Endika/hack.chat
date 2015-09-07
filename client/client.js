@@ -9,41 +9,47 @@ var frontpage = [
 	"Channels are created and joined by going to https://hack.chat/?your-channel. There are no channel lists, so a secret channel name can be used for private discussions.",
 	"",
 	"Here are some pre-made channels you can join:",
-	"?lobby ?meta ?random",
+	"?lounge ?meta",
+	"?math ?physics ?chemistry",
 	"?technology ?programming",
-	"?math ?physics ?asciiart",
+	"?games ?banana",
 	"And here's a random one generated just for you: ?" + Math.random().toString(36).substr(2, 8),
 	"",
 	"",
 	"Formatting:",
 	"Whitespace is preserved, so source code can be pasted verbatim.",
-	"Surround LaTeX with a dollar sign for inline style $\\zeta(2) = \\pi^2/6$, and two dollars for display.",
-	"$$\\int_0^1 \\int_0^1 \\frac{1}{1-xy} dx dy = \\frac{\\pi^2}{6}$$",
+	"Surround LaTeX with a dollar sign for inline style $\\zeta(2) = \\pi^2/6$, and two dollars for display. $$\\int_0^1 \\int_0^1 \\frac{1}{1-xy} dx dy = \\frac{\\pi^2}{6}$$",
 	"",
-	"GitHub repo: https://github.com/AndrewBelt/hack.chat",
-	"Server and client released under the GNU General Public License.",
+	"GitHub: https://github.com/AndrewBelt/hack.chat",
+	"Android apps: https://goo.gl/UkbKYy https://goo.gl/qasdSu",
+	"",
+	"Server and web client released under the GNU General Public License.",
 	"No message history is retained on the hack.chat server.",
 ].join("\n")
 
 function $(query) {return document.querySelector(query)}
 
 function localStorageGet(key) {
-	if (localStorage) {
-		return localStorage[key]
+	try {
+		return window.localStorage[key]
 	}
+	catch(e) {}
 }
 
 function localStorageSet(key, val) {
-	if (localStorage) {
-		localStorage[key] = val
+	try {
+		window.localStorage[key] = val
 	}
+	catch(e) {}
 }
 
 
 var ws
 var myNick = localStorageGet('my-nick')
 var myChannel = window.location.search.replace(/^\?/, '')
-var lastSent = ""
+var lastSent = [""]
+var lastSentPos = 0
+
 
 // Ping server every 50 seconds to retain WebSocket connection
 window.setInterval(function() {
@@ -76,7 +82,7 @@ function join(channel) {
 
 	ws.onclose = function() {
 		if (wasConnected) {
-			pushMessage('!', "Server disconnected. Attempting to reconnect...", Date.now(), 'warn')
+			pushMessage({nick: '!', text: "Server disconnected. Attempting to reconnect..."})
 		}
 		window.setTimeout(function() {
 			join(channel)
@@ -94,20 +100,18 @@ function join(channel) {
 
 var COMMANDS = {
 	chat: function(args) {
-		var cls
-		if (args.admin) {
-			cls = 'admin'
+		if (ignoredUsers.indexOf(args.nick) >= 0) {
+			return
 		}
-		else if (myNick == args.nick) {
-			cls = 'me'
-		}
-		pushMessage(args.nick, args.text, args.time, cls)
+		pushMessage(args)
 	},
 	info: function(args) {
-		pushMessage('*', args.text, args.time, 'info')
+		args.nick = '*'
+		pushMessage(args)
 	},
 	warn: function(args) {
-		pushMessage('!', args.text, args.time, 'warn')
+		args.nick = '!'
+		pushMessage(args)
 	},
 	onlineSet: function(args) {
 		var nicks = args.nicks
@@ -115,54 +119,71 @@ var COMMANDS = {
 		nicks.forEach(function(nick) {
 			userAdd(nick)
 		})
-		pushMessage('*', "Users online: " + nicks.join(", "), Date.now(), 'info')
+		pushMessage({nick: '*', text: "Users online: " + nicks.join(", ")})
 	},
 	onlineAdd: function(args) {
 		var nick = args.nick
 		userAdd(nick)
 		if ($('#joined-left').checked) {
-			pushMessage('*', nick + " joined", Date.now(), 'info')
+			pushMessage({nick: '*', text: nick + " joined"})
 		}
 	},
 	onlineRemove: function(args) {
 		var nick = args.nick
 		userRemove(nick)
 		if ($('#joined-left').checked) {
-			pushMessage('*', nick + " left", Date.now(), 'info')
+			pushMessage({nick: '*', text: nick + " left"})
 		}
 	},
 }
 
 
-function pushMessage(nick, text, time, cls) {
+function pushMessage(args) {
 	// Message container
 	var messageEl = document.createElement('div')
 	messageEl.classList.add('message')
-	if (cls) {
-		messageEl.classList.add(cls)
+	if (args.admin) {
+		messageEl.classList.add('admin')
+	}
+	else if (args.nick == myNick) {
+		messageEl.classList.add('me')
+	}
+	else if (args.nick == '!') {
+		messageEl.classList.add('warn')
+	}
+	else if (args.nick == '*') {
+		messageEl.classList.add('info')
 	}
 
 	// Nickname
-	var nickEl = document.createElement('a')
-	nickEl.textContent = nick || ''
-	if (time) {
-		var date = new Date(time)
-		nickEl.title = date.toLocaleString()
-	}
-	nickEl.onclick = function() {
-		insertAtCursor("@" + nick + " ")
-		$('#chatinput').focus()
-	}
 	var nickSpanEl = document.createElement('span')
 	nickSpanEl.classList.add('nick')
-	nickSpanEl.appendChild(nickEl)
 	messageEl.appendChild(nickSpanEl)
+
+	if (args.trip) {
+		var tripEl = document.createElement('span')
+		tripEl.textContent = args.trip + " "
+		tripEl.classList.add('trip')
+		nickSpanEl.appendChild(tripEl)
+	}
+
+	if (args.nick) {
+		var nickLinkEl = document.createElement('a')
+		nickLinkEl.textContent = args.nick
+		nickLinkEl.onclick = function() {
+			insertAtCursor("@" + args.nick + " ")
+			$('#chatinput').focus()
+		}
+		var date = new Date(args.time || Date.now())
+		nickLinkEl.title = date.toLocaleString()
+		nickSpanEl.appendChild(nickLinkEl)
+	}
 
 	// Text
 	var textEl = document.createElement('pre')
 	textEl.classList.add('text')
 
-	textEl.textContent = text || ''
+	textEl.textContent = args.text || ''
 	textEl.innerHTML = textEl.innerHTML.replace(/(\?|https?:\/\/)\S+?(?=[,.!?:)]?\s|$)/g, parseLinks)
 
 	if ($('#parse-latex').checked) {
@@ -196,7 +217,12 @@ function pushMessage(nick, text, time, cls) {
 function insertAtCursor(text) {
 	var input = $('#chatinput')
 	var start = input.selectionStart || 0
-	input.value = input.value.substr(0, start) + text + input.value.substr(start)
+	var before = input.value.substr(0, start)
+	var after = input.value.substr(start)
+	before += text
+	input.value = before + after
+	input.selectionStart = input.selectionEnd = before.length
+	updateInputSize()
 }
 
 
@@ -268,25 +294,67 @@ $('#footer').onclick = function() {
 
 $('#chatinput').onkeydown = function(e) {
 	if (e.keyCode == 13 /* ENTER */ && !e.shiftKey) {
+		e.preventDefault()
+		// Submit message
 		if (e.target.value != '') {
 			var text = e.target.value
 			e.target.value = ''
 			send({cmd: 'chat', text: text})
-			lastSent = text
+			lastSent[0] = text
+			lastSent.unshift("")
+			lastSentPos = 0
 			updateInputSize()
 		}
-		e.preventDefault()
 	}
 	else if (e.keyCode == 38 /* UP */) {
-		// Restore previous sent message
-		if (e.target.value == '') {
-			e.target.value = lastSent
-			e.target.selectionStart = e.target.value.length
-			updateInputSize()
+		// Restore previous sent messages
+		if (e.target.selectionStart === 0 && lastSentPos < lastSent.length - 1) {
 			e.preventDefault()
+			if (lastSentPos == 0) {
+				lastSent[0] = e.target.value
+			}
+			lastSentPos += 1
+			e.target.value = lastSent[lastSentPos]
+			e.target.selectionStart = e.target.selectionEnd = e.target.value.length
+			updateInputSize()
+		}
+	}
+	else if (e.keyCode == 40 /* DOWN */) {
+		if (e.target.selectionStart === e.target.value.length && lastSentPos > 0) {
+			e.preventDefault()
+			lastSentPos -= 1
+			e.target.value = lastSent[lastSentPos]
+			e.target.selectionStart = e.target.selectionEnd = 0
+			updateInputSize()
+		}
+	}
+	else if (e.keyCode == 27 /* ESC */) {
+		e.preventDefault()
+		// Clear input field
+		e.target.value = ""
+		lastSentPos = 0
+		lastSent[lastSentPos] = ""
+		updateInputSize()
+	}
+	else if (e.keyCode == 9 /* TAB */) {
+		// Tab complete nicknames starting with @
+		e.preventDefault()
+		var pos = e.target.selectionStart || 0
+		var text = e.target.value
+		var index = text.lastIndexOf('@', pos)
+		if (index >= 0) {
+			var stub = text.substring(index + 1, pos).toLowerCase()
+			// Search for nick beginning with stub
+			var nicks = onlineUsers.filter(function(nick) {
+				return nick.toLowerCase().indexOf(stub) == 0
+			})
+			if (nicks.length == 1) {
+				insertAtCursor(nicks[0].substr(stub.length) + " ")
+			}
 		}
 	}
 }
+
 
 function updateInputSize() {
 	var atBottom = isAtBottom()
@@ -321,7 +389,7 @@ $('#sidebar').onmouseleave = document.ontouchstart = function() {
 	}
 }
 
-$('#clear-history').onclick = function() {
+$('#clear-messages').onclick = function() {
 	// Delete children elements
 	var messages = $('#messages')
 	while (messages.firstChild) {
@@ -354,13 +422,19 @@ $('#parse-latex').onchange = function(e) {
 
 // User list
 
+var onlineUsers = []
+var ignoredUsers = []
+
 function userAdd(nick) {
 	var user = document.createElement('a')
 	user.textContent = nick
-	user.onclick = userInvite
+	user.onclick = function(e) {
+		userInvite(nick)
+	}
 	var userLi = document.createElement('li')
 	userLi.appendChild(user)
 	$('#users').appendChild(userLi)
+	onlineUsers.push(nick)
 }
 
 function userRemove(nick) {
@@ -372,6 +446,10 @@ function userRemove(nick) {
 			users.removeChild(user)
 		}
 	}
+	var index = onlineUsers.indexOf(nick)
+	if (index >= 0) {
+		onlineUsers.splice(index, 1)
+	}
 }
 
 function usersClear() {
@@ -379,11 +457,15 @@ function usersClear() {
 	while (users.firstChild) {
 		users.removeChild(users.firstChild)
 	}
+	onlineUsers.length = 0
 }
 
-function userInvite(e) {
-	var nick = e.target.textContent
+function userInvite(nick) {
 	send({cmd: 'invite', nick: nick})
+}
+
+function userIgnore(nick) {
+	ignoredUsers.push(nick)
 }
 
 /* color scheme switcher */
@@ -441,7 +523,7 @@ $('#scheme-selector').value = currentScheme
 /* main */
 
 if (myChannel == '') {
-	pushMessage('', frontpage)
+	pushMessage({text: frontpage})
 	$('#footer').classList.add('hidden')
 	$('#sidebar').classList.add('hidden')
 }
